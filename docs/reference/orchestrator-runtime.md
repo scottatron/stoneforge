@@ -546,11 +546,100 @@ session.resize(120, 40);
 
 ### Built-in Providers
 
-| Provider | Name | Class |
-|----------|------|-------|
-| Claude Code | `'claude-code'` | `ClaudeAgentProvider` |
-| OpenCode | `'opencode'` | `OpenCodeAgentProvider` |
-| Codex | `'codex'` | `CodexAgentProvider` |
+| Provider | Name | Class | Execution |
+|----------|------|-------|-----------|
+| Claude Code | `'claude-code'` | `ClaudeAgentProvider` | Local process |
+| OpenCode | `'opencode'` | `OpenCodeAgentProvider` | Local process |
+| Codex | `'codex'` | `CodexAgentProvider` | Local process (JSON-RPC) |
+| Remote | `'remote'` | `RemoteAgentProvider` | Remote machine via HTTP |
+
+### Remote Agent Provider
+
+The `RemoteAgentProvider` delegates session execution to a **remote machine**
+running the `RemoteAgentNode` server.  This allows you to spread agents across
+multiple machines (e.g. different cloud VMs, build runners, or bare-metal boxes).
+
+#### Control-plane side
+
+```typescript
+import { RemoteAgentProvider, getProviderRegistry } from '@stoneforge/smithy/providers';
+
+// Create a provider pointing at your remote node
+const remote = new RemoteAgentProvider({
+  url: 'https://agent-node.example.com',   // or http://10.0.0.5:4000
+  apiKey: process.env.REMOTE_NODE_API_KEY!, // shared secret
+  provider: 'claude-code',                  // provider used on the remote machine
+});
+
+// Register with the orchestrator
+const registry = getProviderRegistry();
+registry.register(remote);
+
+// Optionally make it the default
+registry.setDefault('remote');
+```
+
+#### Remote machine side
+
+On each remote machine, install `@stoneforge/smithy` and start the node server:
+
+```typescript
+import { createRemoteAgentNode } from '@stoneforge/smithy/providers';
+
+const node = createRemoteAgentNode({
+  apiKey: process.env.REMOTE_NODE_API_KEY!,
+  provider: 'claude-code',  // default provider on this machine
+});
+
+// Start listening (returns Bun server handle)
+const server = node.start(4000);
+```
+
+The node server exposes:
+- `GET  /health` — provider availability + protocol version
+- `POST /sessions/headless` — spawn a headless session
+- `GET  /sessions/headless/:id/events` — SSE stream of `AgentMessage` events
+- `POST /sessions/headless/:id/message` — send a follow-up message
+- `POST /sessions/headless/:id/interrupt` — interrupt the session
+- `DELETE /sessions/headless/:id` — close/abort
+- `POST /sessions/interactive` — spawn a PTY session
+- `WS   /sessions/interactive/:id/pty` — bidirectional PTY WebSocket
+- `POST /sessions/interactive/:id/resize` — resize the terminal
+- `DELETE /sessions/interactive/:id` — kill the session
+
+Authentication uses `Authorization: Bearer <apiKey>` on all HTTP requests.
+WebSocket connections authenticate via `?token=<apiKey>` query parameter.
+
+> **Security note:** The WebSocket token is transmitted in the URL query string,
+> which may appear in server access logs. Always use HTTPS/WSS in production.
+> Never expose the remote node directly to the internet without TLS termination.
+
+#### Targeting multiple remote nodes
+
+Register each remote node under a distinct name:
+
+```typescript
+class RemoteNodeEU extends RemoteAgentProvider {
+  override readonly name = 'remote-eu';
+}
+
+class RemoteNodeUS extends RemoteAgentProvider {
+  override readonly name = 'remote-us';
+}
+
+registry.register(new RemoteNodeEU({ url: 'https://eu.agent.example.com', apiKey: EU_KEY }));
+registry.register(new RemoteNodeUS({ url: 'https://us.agent.example.com', apiKey: US_KEY }));
+```
+
+Then assign per-pool:
+
+```typescript
+const pool = await api.createPool({
+  name: 'eu-workers',
+  maxSize: 5,
+  agentTypes: [{ role: 'worker', workerMode: 'ephemeral', provider: 'remote-eu' }],
+});
+```
 
 ### Registering a Custom Provider
 
