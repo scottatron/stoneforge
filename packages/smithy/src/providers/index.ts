@@ -54,3 +54,15 @@ export {
   CodexInteractiveProvider,
   CodexEventMapper,
 } from './codex/index.js';
+
+// Remote provider
+export {
+  RemoteAgentProvider,
+  RemoteHeadlessProvider,
+  RemoteInteractiveProvider,
+} from './remote/index.js';
+export type { RemoteNodeConnectionConfig } from './remote/index.js';
+
+// Remote agent node server
+export { createRemoteAgentNode } from './remote/node-server.js';
+export type { RemoteAgentNodeConfig } from './remote/node-server.js';

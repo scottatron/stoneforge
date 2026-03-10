@@ -201,6 +201,46 @@ API call (get/list/query)
      ▼                                 ▼
 ```
 
+**Primary transport: Shared SQLite database (polling)**
+
+The control plane (smithy-server) and agents communicate via the shared
+`stoneforge.db` SQLite database. The dispatch daemon polls every 5 seconds
+for tasks to assign and messages to route. No direct TCP connection is
+established between the control plane and agent processes.
+
+**Secondary transport: WebSocket (interactive agents)**
+
+Directors and persistent workers use a PTY WebSocket (`/ws` on port 3457)
+for real-time terminal I/O streaming.
+
+### Remote Agents
+
+Agent processes can run on **remote machines** via the `RemoteAgentProvider`.
+
+```
+Control plane (smithy-server)         Remote machine
+┌───────────────────────────┐         ┌─────────────────────────────────┐
+│   SpawnerService          │  HTTP   │   RemoteAgentNode (port 4000)   │
+│   RemoteAgentProvider ────┼────────→│   • POST /sessions/headless     │
+│   • Headless: HTTP + SSE  │  SSE ←──┼─── GET  /sessions/.../events    │
+│   • Interactive: WS       │  WS ←──→┼─── WS   /sessions/.../pty       │
+└───────────────────────────┘         │   Spawns local agent process    │
+                                      └─────────────────────────────────┘
+```
+
+The remote node runs a local agent provider (Claude, OpenCode, Codex) and
+bridges the sessions to the control plane over HTTP + SSE (headless) or
+WebSocket (interactive PTY). Authentication uses a shared API key.
+
+See `packages/smithy/src/providers/remote/` for the implementation.
+
+| Transport | Protocol | Use Case |
+|-----------|----------|----------|
+| SQLite polling | File I/O | Task dispatch, status reporting (shared DB) |
+| HTTP + SSE | fetch + ReadableStream | Headless remote sessions |
+| WebSocket | Binary/text frames | Interactive (PTY) remote sessions |
+| Child process stdio | JSON-RPC / stream-json | Local provider communication |
+
 ## Entry Points by Task
 
 | Task | Entry Point |
